@@ -6,23 +6,66 @@ module Make (Net : Mirage_net.S) = struct
 
   type lease = Dhcp_wire.pkt
 
-  type t = lease Lwt_stream.t
+  type t = {
+    net : Net.t;
+    mutable c : Dhcp_client.t;
+    push : lease option -> unit;
+  }
+
+  let header_size = Ethernet.Packet.sizeof_ethernet
+
+  let initiate_renew t =
+    match Dhcp_client.renew t.c with
+    | `Noop -> Log.debug (fun f -> f "Can't renew this lease; won't try");  Lwt.return_unit
+    | `Response (c, pkt) ->
+      Log.debug (fun f -> f "attempted to renew lease: %a" Dhcp_client.pp c);
+      t.c <- c;
+      Net.write t.net ~size:(Net.mtu t.net + header_size) (Dhcp_wire.pkt_into_buf pkt) >>= function
+      | Error e ->
+        Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
+        Lwt.return_unit
+      | Ok () ->
+        Lwt.return_unit
+
+  let input t k buf =
+    match Dhcp_client.input t.c buf with
+    | `Noop ->
+      Log.debug (fun f -> f "No action! State is %a" Dhcp_client.pp t.c);
+      k buf
+    | `Response (s, action) -> begin
+        Net.write t.net ~size:(Net.mtu t.net + header_size) (Dhcp_wire.pkt_into_buf action) >>= function
+        | Error e ->
+          Log.err (fun f -> f "Failed to write lease transaction response: %a" Net.pp_error e);
+          Lwt.return_unit
+        | Ok () ->
+          Log.debug (fun f -> f "State advanced! Now %a" Dhcp_client.pp s);
+          t.c <- s;
+          Lwt.return_unit
+      end
+    | `New_lease (s, l) ->
+      let open Dhcp_wire in
+      (* a lease is obtained! Note it, and replace the current listener *)
+      Log.info (fun f -> f "Lease obtained! IP: %a, routers: %a"
+                   Ipaddr.V4.pp l.yiaddr
+                   (Fmt.list Ipaddr.V4.pp) (collect_routers l.options));
+      t.push @@ Some l;
+      t.c <- s;
+      Lwt.return_unit
 
   let connect ?xid ?options ?requests net =
     (* listener needs to occasionally check to see whether the state has advanced,
      * and if not, start a new attempt at a lease transaction *)
-    let sleep_interval = Duration.of_sec 4 in
-    let header_size = Ethernet.Packet.sizeof_ethernet in
     let size = Net.mtu net + header_size in
+    let sleep_interval = Duration.of_sec 4 in
 
     let xid = match xid with
       | None -> Randomconv.int32 Mirage_crypto_rng.generate
       | Some xid -> xid
     in
     let (client, dhcpdiscover) = Dhcp_client.create ?options ?requests xid (Net.mac net) in
-    let c = ref client in
+    let c = client in
 
-    let rec get_lease dhcpdiscover =
+    let rec get_lease t dhcpdiscover =
       Log.debug (fun f -> f "Sending DHCPDISCOVER...");
       Net.write net ~size (Dhcp_wire.pkt_into_buf dhcpdiscover) >>= function
       | Error e ->
@@ -30,55 +73,39 @@ module Make (Net : Mirage_net.S) = struct
         Lwt.return_unit
       | Ok () ->
         Mirage_sleep.ns sleep_interval >>= fun () ->
-        match Dhcp_client.lease !c with
+        match Dhcp_client.lease t.c with
         | Some _lease -> Lwt.return_unit
         | None ->
           let xid = Randomconv.int32 Mirage_crypto_rng.generate in
           let (client, dhcpdiscover) = Dhcp_client.create ?requests xid (Net.mac net) in
-          c := client;
+          t.c <- client;
           Log.info (fun f -> f "Timeout expired without a usable lease!  Starting over...");
-          Log.debug (fun f -> f "New lease attempt: %a" Dhcp_client.pp !c);
-          get_lease dhcpdiscover
+          Log.debug (fun f -> f "New lease attempt: %a" Dhcp_client.pp t.c);
+          get_lease t dhcpdiscover
     in
-    let listen wakeup push () =
-      Net.listen net ~header_size (fun buf ->
-        match Dhcp_client.input !c buf with
-        | `Noop ->
-          Log.debug (fun f -> f "No action! State is %a" Dhcp_client.pp !c);
-          Lwt.return_unit
-        | `Response (s, action) -> begin
-            Net.write net ~size (Dhcp_wire.pkt_into_buf action) >>= function
-            | Error e ->
-              Log.err (fun f -> f "Failed to write lease transaction response: %a" Net.pp_error e);
-              Lwt.return_unit
-            | Ok () ->
-              Log.debug (fun f -> f "State advanced! Now %a" Dhcp_client.pp s);
-              c := s;
-              Lwt.return_unit
-        end
-        | `New_lease (s, l) ->
-          let open Dhcp_wire in
-          (* a lease is obtained! Note it, and replace the current listener *)
-          Log.info (fun f -> f "Lease obtained! IP: %a, routers: %a"
-                       Ipaddr.V4.pp l.yiaddr
-                       (Fmt.list Ipaddr.V4.pp) (collect_routers l.options));
-          push @@ Some l;
-          c := s;
+    let listen t wakeup =
+      let fn buf =
+        let push x =
           Lwt.wakeup wakeup ();
-          Lwt.return_unit
-        )
+          t.push x
+        in
+        let k = Fun.const Lwt.return_unit in
+        input { t with push } k buf >|= ignore
+      in
+      Net.listen net ~header_size fn
     in
-    let lease_wrapper (push : Dhcp_wire.pkt option -> unit) () =
+    let lease_wrapper t () =
       let fin, wakeup = Lwt.wait () in
       Lwt.pick [
-        (listen wakeup push () >|= function
-          | Error _ | Ok () -> push None (* if canceled, the stream should end *)
+        (listen t wakeup >|= function
+          | Error _ | Ok () -> t.push None (* if canceled, the stream should end *)
         );
-        get_lease dhcpdiscover;
+        get_lease t dhcpdiscover;
         fin;
       ]
     in
     let (s, push) = Lwt_stream.create () in
-    Lwt.async (fun () -> lease_wrapper push ());
-    Lwt.return s
+    let t = { net; c; push } in
+    Lwt.async (fun () -> lease_wrapper t ());
+    Lwt.return (t, s)
 end
