@@ -71,12 +71,11 @@ module Make (Network : Mirage_net.S) (E : Ethernet.S) (Arp : Arp.S) = struct
       connect ~no_init ~cidr ?gateway ethernet arp >|= fun static ->
       Static static
 
-  let input t ~tcp ~udp ~default buf =
-    match t with
+  let input = function
     | Dhcp t ->
-      DHCP.input t.dhcp (input t.static ~udp ~tcp ~default) buf
+      fun ~tcp ~udp ~default -> DHCP.input t.dhcp (input t.static ~tcp ~udp ~default)
     | Static t ->
-      input t ~tcp ~udp ~default buf
+      fun ~tcp ~udp ~default -> input t ~tcp ~udp ~default
 
   let disconnect (Dhcp { static; _ } | Static static) =
     disconnect static
