@@ -87,7 +87,10 @@ module Make (Net : Mirage_net.S) = struct
           Lwt.wakeup wakeup ();
           t.push x
         in
-        let k = Fun.const Lwt.return_unit in
+        let k _ =
+          Log.debug (fun f -> f "No action! State is %a" Dhcp_client.pp t.c);
+          Lwt.return_unit
+        in
         input { t with push } k buf >|= ignore
       in
       Net.listen net ~header_size fn
