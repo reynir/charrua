@@ -29,9 +29,7 @@ module Make (Net : Mirage_net.S) = struct
 
   let input t k buf =
     match Dhcp_client.input t.c buf with
-    | `Noop ->
-      Log.debug (fun f -> f "No action! State is %a" Dhcp_client.pp t.c);
-      k buf
+    | `Noop -> k buf
     | `Response (s, action) -> begin
         Net.write t.net ~size:(Net.mtu t.net + header_size) (Dhcp_wire.pkt_into_buf action) >>= function
         | Error e ->
