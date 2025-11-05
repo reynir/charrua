@@ -20,7 +20,10 @@ let config_of_lease lease =
     | [] -> (network, None)
     | hd::_ -> (network, Some hd)
 
-module Make (Network : Mirage_net.S) = struct
+module Make (Network : Mirage_net.S)(R : sig
+    type 'a t
+    val resolve : 'a t -> 'a -> unit
+  end) = struct
   (* for now, just wrap a static ipv4 *)
   module Net = Dhcp_client_lwt.Make(Network)
   module Ethernet = Ethernet.Make(Net)
@@ -39,7 +42,7 @@ module Make (Network : Mirage_net.S) = struct
        in
       Net.connect ?options ~requests net >>= fun dhcp ->
       Lwt_mvar.take (Net.lease_mvar dhcp) >>= fun lease ->
-      Option.iter (fun r -> Lwt.wakeup_later r (Some lease.options)) registry;
+      Option.iter (fun r -> R.resolve r (Some lease.options)) registry;
       let cidr, gateway = config_of_lease lease in
       Lwt.async (fun () -> 
           let rec read_lease () =
@@ -55,11 +58,11 @@ module Make (Network : Mirage_net.S) = struct
       Lwt.return (dhcp, (cidr, gateway))
      | true, None ->
        Net.connect_no_dhcp net >>= fun dhcp ->
-       Option.iter (fun r -> Lwt.wakeup_later r None) registry;
+       Option.iter (fun r -> R.resolve r None) registry;
        Lwt.return (dhcp, (Ipaddr.V4.(Prefix.make 32 localhost), gateway))
      | _, Some cidr ->
        Net.connect_no_dhcp net >>= fun dhcp ->
-       Option.iter (fun r -> Lwt.wakeup_later r None) registry;
+       Option.iter (fun r -> R.resolve r None) registry;
        Lwt.return (dhcp, (cidr, gateway))) >>= fun (dhcp, (cidr, gateway)) ->
     Ethernet.connect dhcp >>= fun ethernet ->
     Arp.connect ethernet >>= fun arp ->

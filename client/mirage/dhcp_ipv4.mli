@@ -14,12 +14,12 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-module Make (Network : Mirage_net.S) : sig
+module Make (Network : Mirage_net.S)(R : sig type 'a t val resolve : 'a t -> 'a -> unit end) : sig
   module Net : Mirage_net.S
   module Ethernet : Ethernet.S
   module Arp : Arp.S
   module IPv4 : Tcpip.Ip.S with type ipaddr = Ipaddr.V4.t and type prefix = Ipaddr.V4.Prefix.t
-  val connect : ?registry:Dhcp_wire.dhcp_option list option Lwt.u -> ?no_init:bool -> ?cidr:Ipaddr.V4.Prefix.t -> ?gateway:Ipaddr.V4.t ->
+  val connect : ?registry:Dhcp_wire.dhcp_option list option R.t -> ?no_init:bool -> ?cidr:Ipaddr.V4.Prefix.t -> ?gateway:Ipaddr.V4.t ->
     ?options:Dhcp_wire.dhcp_option list -> ?requests:Dhcp_wire.option_code list ->
     Network.t -> (Net.t * Ethernet.t * Arp.t * IPv4.t) Lwt.t
   (** Connect to an ipv4 device using information from a DHCP lease.
