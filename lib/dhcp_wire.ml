@@ -1482,7 +1482,7 @@ let pkt_into_buf pkt buf =
   (* Ethernet *)
   Cstruct.blit_from_string (Macaddr.to_octets pkt.dstmac) 0 eth 0 6;
   Cstruct.blit_from_string (Macaddr.to_octets pkt.srcmac) 0 eth 6 6;
-  Cstruct.BE.set_uint16 eth 12 0x0800;
+  Cstruct.BE.set_uint16 eth 12 0x0800; (* IPv4 protocol *)
   (* UDP *)
   Cstruct.BE.set_uint16 udp 0 pkt.srcport;
   Cstruct.BE.set_uint16 udp 2 pkt.dstport;
@@ -1494,8 +1494,8 @@ let pkt_into_buf pkt buf =
   Cstruct.BE.set_uint16 ip 2 (sizeof_ipv4 + sizeof_udp + dhcp_len);
   Cstruct.BE.set_uint16 ip 4 0;
   Cstruct.BE.set_uint16 ip 6 0;
-  Cstruct.set_uint8 ip 8 255;
-  Cstruct.set_uint8 ip 9 17;
+  Cstruct.set_uint8 ip 8 255; (* TTL *)
+  Cstruct.set_uint8 ip 9 17; (* UDP protocol *)
   Cstruct.BE.set_uint16 ip 10 0;
   Cstruct.BE.set_uint32 ip 12 (Ipaddr.V4.to_int32 pkt.srcip);
   Cstruct.BE.set_uint32 ip 16 (Ipaddr.V4.to_int32 pkt.dstip);
@@ -1505,7 +1505,7 @@ let pkt_into_buf pkt buf =
   Cstruct.BE.set_uint32 ph 0 (Ipaddr.V4.to_int32 pkt.srcip);
   Cstruct.BE.set_uint32 ph 4 (Ipaddr.V4.to_int32 pkt.dstip);
   Cstruct.set_uint8 ph 8 0;
-  Cstruct.set_uint8 ph 9 17;
+  Cstruct.set_uint8 ph 9 17; (* UDP protocol *)
   Cstruct.BE.set_uint16 ph 10 (sizeof_udp + dhcp_len);
   let chk = 0 in
   let chk = Chk.add chk ph in
