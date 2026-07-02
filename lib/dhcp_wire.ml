@@ -75,14 +75,10 @@ type dhcp = {
 *)
 
 module Chk = struct
-  (* NOTE(dinosaure): it's a dumb implementation which takes the advantage of
-     everything is into some [Cstruct.t]. We also don't really check the
-     overflow and this code does not work probably for huge packets on 32-bits
-     architecture. But for DHCP packets, that's fine... I believe. *)
-
   let add chk cs =
     let len = Cstruct.length cs in
     let rec go chk idx =
+      let chk = (chk land 0xffff) + (chk lsr 16) in
       if idx + 1 < len then go (chk + Cstruct.BE.get_uint16 cs idx) (idx + 2)
       else if idx < len then go (chk + Cstruct.get_uint8 cs idx lsl 8) (idx + 1)
       else chk in
