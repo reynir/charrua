@@ -1386,7 +1386,7 @@ let pkt_of_buf buf len =
     let dstport = Cstruct.BE.get_uint16 buf (udp_off + 2) in
     let udp_len = Cstruct.BE.get_uint16 buf (udp_off + 4) in
     let chk = Cstruct.BE.get_uint16 buf (udp_off + 6) in
-    (* NOTE(dinosaure): compute the checksum only if [chr <> 0]. *)
+    (* NOTE(dinosaure): compute the checksum only if [chk <> 0]. *)
     let* () = if chk = 0 then Ok ()
       else begin
         let ph = Cstruct.create 12 in
