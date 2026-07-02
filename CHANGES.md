@@ -1,3 +1,7 @@
+### v3.2.0 (2026-07-02)
+
+* Remove ethernet and tcpip dependencies from the core charrua (#155 @dinosaure)
+
 ### v3.1.2 (2026-06-29)
 
 * server: stop the lease scan at pool top (was only tested with /24 networks)
