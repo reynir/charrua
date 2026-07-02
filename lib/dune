@@ -1,4 +1,4 @@
 (library
  (name dhcp_wire)
  (public_name charrua)
- (libraries cstruct ethernet tcpip.ipv4 tcpip.udp ipaddr macaddr fmt ohex))
+ (libraries cstruct ipaddr macaddr fmt ohex))
