@@ -80,7 +80,8 @@ module Chk = struct
      overflow and this code does not work probably for huge packets on 32-bits
      architecture. But for DHCP packets, that's fine... I believe. *)
 
-  let add chk ({ Cstruct.len; _ } as cs) =
+  let add chk cs =
+    let len = Cstruct.length cs in
     let rec go chk idx =
       if idx + 1 < len then go (chk + Cstruct.BE.get_uint16 cs idx) (idx + 2)
       else if idx < len then go (chk + Cstruct.get_uint8 cs idx lsl 8) (idx + 1)
