@@ -1407,7 +1407,7 @@ let pkt_of_buf buf len =
       end in
     let udp_payload = Cstruct.shift buf (udp_off + sizeof_udp) in
     (* DHCP layer *)
-    let op = int_to_op_exn (get_dhcp_op udp_payload) in
+    let* op = int_to_op (get_dhcp_op udp_payload) |> Option.to_result ~none:`Not_dhcp in
     let htype = if (get_dhcp_htype udp_payload) = 1 then
         Ethernet_10mb
       else
