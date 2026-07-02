@@ -1489,7 +1489,7 @@ let pkt_into_buf pkt buf =
   Cstruct.BE.set_uint16 udp 4 (sizeof_udp + dhcp_len);
   Cstruct.BE.set_uint16 udp 6 0;
   (* IP *)
-  Cstruct.set_uint8 ip 0 0x45;
+  Cstruct.set_uint8 ip 0 0x45; (* IHL = (version 4) | (len = 5) *)
   Cstruct.set_uint8 ip 1 0;
   Cstruct.BE.set_uint16 ip 2 (sizeof_ipv4 + sizeof_udp + dhcp_len);
   Cstruct.BE.set_uint16 ip 4 0;
