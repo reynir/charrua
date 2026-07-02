@@ -1371,6 +1371,7 @@ let pkt_of_buf buf len =
   let wrap () =
     let test = len >= sizeof_ethernet + sizeof_ipv4 + sizeof_udp + sizeof_dhcp in
     let* () = guard test `Not_dhcp in
+    (* check if it's IPv4 protocol ([0x0800]) *)
     let* () = guard (Cstruct.BE.get_uint16 buf 12 = 0x0800) `Not_dhcp in
     (* Ethernet layer *)
     let dstmac = Macaddr.of_octets_exn (Cstruct.to_string ~off:0 ~len:6 buf) in
@@ -1379,6 +1380,7 @@ let pkt_of_buf buf len =
     let ihl = Cstruct.get_uint8 buf sizeof_ethernet land 0x0f in
     let* () = guard (ihl >= 5) `Not_dhcp in
     let ip_hdr_len = ihl * 4 in
+    (* check if it's UDP protocol ([17]) *)
     let* () = guard (Cstruct.get_uint8 buf (sizeof_ethernet + 9) = 17) `Not_dhcp in
     let srcip = Ipaddr.V4.of_int32 (Cstruct.BE.get_uint32 buf (sizeof_ethernet + 12)) in
     let dstip = Ipaddr.V4.of_int32 (Cstruct.BE.get_uint32 buf (sizeof_ethernet + 16)) in
