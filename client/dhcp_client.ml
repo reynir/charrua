@@ -200,6 +200,8 @@ let input t buf =
         (* "the mechanism used to select one DHCPOFFER [is] implementation
            dependent" (RFC2131) so just take the first one *)
         let server_ip =
+          (* Some servers put 0.0.0.0 as siaddr (which I find dubious), but put
+             a valid IP as server identifier option. *)
           Option.value
             (Dhcp_wire.find_server_identifier incoming.options)
             ~default:incoming.siaddr
