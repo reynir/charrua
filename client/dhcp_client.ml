@@ -199,7 +199,12 @@ let input t buf =
     | Some DHCPOFFER, Selecting dhcpdiscover ->
         (* "the mechanism used to select one DHCPOFFER [is] implementation
            dependent" (RFC2131) so just take the first one *)
-        let dhcprequest = offer t ~server_ip:incoming.siaddr
+        let server_ip =
+          Option.value
+            (Dhcp_wire.find_server_identifier incoming.options)
+            ~default:incoming.siaddr
+        in
+        let dhcprequest = offer t ~server_ip
                           ~request_ip:incoming.yiaddr
                           ~offer_options:incoming.options
                           ~xid:dhcpdiscover.xid
