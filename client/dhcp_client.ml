@@ -126,14 +126,19 @@ let make_request ?(ciaddr = Ipaddr.V4.any) ~xid ~chaddr ~srcmac ~siaddr ~options
   })
 
 (* respond to an incoming DHCPOFFER. *)
-let offer (t : t) ~xid ~chaddr ~server_ip ~request_ip ~offer_options:_ =
+let offer (t : t) ~xid ~chaddr ~server_ip ~request_ip ~offer_options =
   let open Dhcp_wire in
   (* TODO: make sure the offer contains everything we expect before we accept it *)
   let options = [
     Message_type DHCPREQUEST;
     Request_ip request_ip;
-    Server_identifier server_ip;
   ] @ t.options
+  in
+  let options =
+    match Dhcp_wire.find_server_identifier offer_options with
+    | None -> options
+    | Some server_ip ->
+      Server_identifier server_ip :: options
   in
   let options =
     match t.request_options with
@@ -199,14 +204,7 @@ let input t buf =
     | Some DHCPOFFER, Selecting dhcpdiscover ->
         (* "the mechanism used to select one DHCPOFFER [is] implementation
            dependent" (RFC2131) so just take the first one *)
-        let server_ip =
-          (* Some servers put 0.0.0.0 as siaddr (which I find dubious), but put
-             a valid IP as server identifier option. *)
-          Option.value
-            (Dhcp_wire.find_server_identifier incoming.options)
-            ~default:incoming.siaddr
-        in
-        let dhcprequest = offer t ~server_ip
+        let dhcprequest = offer t ~server_ip:incoming.siaddr
                           ~request_ip:incoming.yiaddr
                           ~offer_options:incoming.options
                           ~xid:dhcpdiscover.xid
