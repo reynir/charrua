@@ -49,16 +49,15 @@ module Make (Net : Mirage_net.S) = struct
       let t2 = Mirage_sleep.ns @@ Duration.of_sec t2 in
       Mirage_sleep.ns @@ Duration.of_sec renewal >>= fun () ->
       let rec send_renewal () =
-
-      match Dhcp_client.renew c with
-      | `Noop -> Lwt.return `Can't_renew
-      | `Response (c, pkt) ->
-        Log.debug (fun f -> f "attempted to renew lease: %a" Dhcp_client.pp c);
-        Net.write net ~size (Dhcp_wire.pkt_into_buf pkt) >>= function
+        match Dhcp_client.renew !c with
+        | `Noop -> Lwt.return `Can't_renew
+        | `Response (c, pkt) ->
+          Log.debug (fun f -> f "attempted to renew lease: %a" Dhcp_client.pp c);
+          Net.write net ~size (Dhcp_wire.pkt_into_buf pkt) >>= function
           | Error e ->
             Lwt.return (`Failed_to_write e)
           | Ok () ->
-            Mirage_sleep.ns (Duration.of_sec 1) >>= send_renewal ()
+            Mirage_sleep.ns (Duration.of_sec 1) >>= send_renewal
       in
       Lwt.pick [
         (Lwt_condition.wait cond >|= fun lease -> `Lease lease);
@@ -72,8 +71,10 @@ module Make (Net : Mirage_net.S) = struct
         failwith "oh no"
       | `Can't_renew ->
         Log.debug (fun f -> f "Can't renew this lease; won't try");
+        Lwt.return_unit
       | `Failed_to_write e ->
         Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
+        Lwt.return_unit
     in
     let rec get_lease cond dhcpdiscover =
       Log.debug (fun f -> f "Sending DHCPDISCOVER...");
@@ -83,11 +84,11 @@ module Make (Net : Mirage_net.S) = struct
         Lwt.return_unit
       | Ok () ->
         Lwt.pick [
-          (Lwt_condition.wait cond >|= fun lease -> `Lease);
+          (Lwt_condition.wait cond >|= fun lease -> `Lease lease);
           (Mirage_sleep.ns sleep_interval >|= fun () -> `Timeout);
         ] >>= function
-        | `Lease _lease ->
-          do_renew t lease
+        | `Lease lease ->
+          do_renew lease
         | `Timeout ->
           let xid = Randomconv.int32 Mirage_crypto_rng.generate in
           let (client, dhcpdiscover) = Dhcp_client.create ?requests xid (Net.mac net) in
@@ -126,7 +127,7 @@ module Make (Net : Mirage_net.S) = struct
           match renew with
           | true ->
             Mirage_sleep.ns @@ Duration.of_sec 1800 >>= fun () ->
-            do_renew !c 1800
+            do_renew l
           | false ->
             Lwt.return_unit
       )
@@ -137,7 +138,6 @@ module Make (Net : Mirage_net.S) = struct
         (listen t cond >|= fun r ->
          Lwt.wakeup_later stop_waker r);
         (get_lease cond dhcpdiscover);
-        do_renew t;
       ]
       >|= fun _units -> ()
     in
