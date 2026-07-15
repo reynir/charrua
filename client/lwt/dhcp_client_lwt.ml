@@ -31,7 +31,6 @@ module Make (Net : Mirage_net.S) = struct
     let c = ref client in
 
     let cond = Lwt_condition.create () in
-    let lease = Lwt_mvar.create_empty () in
 
     let rec do_renew lease =
       let renewal =
@@ -137,6 +136,7 @@ module Make (Net : Mirage_net.S) = struct
       ]
       >|= fun _units -> ()
     in
+    let lease = Lwt_mvar.create_empty () in
     let stop, stop_waker = Lwt.task () in
     let t = { lease; net; listen = Fun.const Lwt.return_unit; stop; listener_condition = Lwt_condition.create () } in
     Lwt.async (fun () -> lease_wrapper t stop_waker);
