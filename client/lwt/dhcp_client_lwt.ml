@@ -126,7 +126,6 @@ module Make (Net : Mirage_net.S) = struct
           (* TODO think more abour renewal, adjust timeouts *)
           match renew with
           | true ->
-            Mirage_sleep.ns @@ Duration.of_sec 1800 >>= fun () ->
             do_renew l
           | false ->
             Lwt.return_unit
