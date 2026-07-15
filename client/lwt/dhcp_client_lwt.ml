@@ -48,25 +48,32 @@ module Make (Net : Mirage_net.S) = struct
       in
       let t2 = Mirage_sleep.ns @@ Duration.of_sec t2 in
       Mirage_sleep.ns @@ Duration.of_sec renewal >>= fun () ->
+      let rec send_renewal () =
+
       match Dhcp_client.renew c with
-      | `Noop -> Log.debug (fun f -> f "Can't renew this lease; won't try");  Lwt.return_unit
+      | `Noop -> Lwt.return `Can't_renew
       | `Response (c, pkt) ->
         Log.debug (fun f -> f "attempted to renew lease: %a" Dhcp_client.pp c);
         Net.write net ~size (Dhcp_wire.pkt_into_buf pkt) >>= function
           | Error e ->
-            Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
-            Lwt.return_unit
+            Lwt.return (`Failed_to_write e)
           | Ok () ->
-            (* TODO: resend, and eventually fail *)
-            Lwt.pick [
-              (Lwt_condition.wait cond >|= fun lease -> `Lease lease);
-              (t2 >|= fun () -> `T2_rebinding)
-            ] >>= function
-            | `Lease lease ->
-              do_renew lease
-            | `T2_rebinding ->
-              (* TODO *)
-              failwith "oh no"
+            Mirage_sleep.ns (Duration.of_sec 1) >>= send_renewal ()
+      in
+      Lwt.pick [
+        (Lwt_condition.wait cond >|= fun lease -> `Lease lease);
+        send_renewal ();
+        (t2 >|= fun () -> `T2_rebinding)
+      ] >>= function
+      | `Lease lease ->
+        do_renew lease
+      | `T2_rebinding ->
+        (* TODO *)
+        failwith "oh no"
+      | `Can't_renew ->
+        Log.debug (fun f -> f "Can't renew this lease; won't try");
+      | `Failed_to_write e ->
+        Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
     in
     let rec get_lease cond dhcpdiscover =
       Log.debug (fun f -> f "Sending DHCPDISCOVER...");
