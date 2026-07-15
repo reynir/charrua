@@ -30,8 +30,24 @@ module Make (Net : Mirage_net.S) = struct
     let (client, dhcpdiscover) = Dhcp_client.create ?options ?requests xid (Net.mac net) in
     let c = ref client in
 
-    let rec do_renew c t =
-      Mirage_sleep.ns @@ Duration.of_sec t >>= fun () ->
+    let cond = Lwt_condition.create () in
+    let lease = Lwt_mvar.create_empty () in
+
+    let rec do_renew lease =
+      let renewal =
+        Dhcp_wire.find_renewal_t1 lease.Dhcp_wire.options
+        |> Option.value ~default:1800l
+        |> Int32.unsigned_to_int
+        |> Option.get (* XXX(reynir): assume 64 bit!? *)
+      in
+      let t2 (* rebinding *) =
+        Dhcp_wire.find_rebinding_t2 lease.Dhcp_wire.options
+        |> Option.value ~default:86400l (* 24h *)
+        |> Int32.unsigned_to_int
+        |> Option.get
+      in
+      let t2 = Mirage_sleep.ns @@ Duration.of_sec t2 in
+      Mirage_sleep.ns @@ Duration.of_sec renewal >>= fun () ->
       match Dhcp_client.renew c with
       | `Noop -> Log.debug (fun f -> f "Can't renew this lease; won't try");  Lwt.return_unit
       | `Response (c, pkt) ->
@@ -41,7 +57,16 @@ module Make (Net : Mirage_net.S) = struct
             Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
             Lwt.return_unit
           | Ok () ->
-            do_renew c t (* ideally t would come from the new lease... *)
+            (* TODO: resend, and eventually fail *)
+            Lwt.pick [
+              (Lwt_condition.wait cond >|= fun lease -> `Lease lease);
+              (t2 >|= fun () -> `T2_rebinding)
+            ] >>= function
+            | `Lease lease ->
+              do_renew lease
+            | `T2_rebinding ->
+              (* TODO *)
+              failwith "oh no"
     in
     let rec get_lease cond dhcpdiscover =
       Log.debug (fun f -> f "Sending DHCPDISCOVER...");
@@ -51,12 +76,12 @@ module Make (Net : Mirage_net.S) = struct
         Lwt.return_unit
       | Ok () ->
         Lwt.pick [
-          Lwt_condition.wait cond;
-          Mirage_sleep.ns sleep_interval;
-        ] >>= fun () ->
-        match Dhcp_client.lease !c with
-        | Some _lease -> Lwt.return_unit
-        | None ->
+          (Lwt_condition.wait cond >|= fun lease -> `Lease);
+          (Mirage_sleep.ns sleep_interval >|= fun () -> `Timeout);
+        ] >>= function
+        | `Lease _lease ->
+          do_renew t lease
+        | `Timeout ->
           let xid = Randomconv.int32 Mirage_crypto_rng.generate in
           let (client, dhcpdiscover) = Dhcp_client.create ?requests xid (Net.mac net) in
           c := client;
@@ -89,7 +114,7 @@ module Make (Net : Mirage_net.S) = struct
                        (Fmt.list Ipaddr.V4.pp) (collect_routers l.options));
           Lwt_mvar.put t.lease l >>= fun () ->
           c := s;
-          Lwt_condition.broadcast cond ();
+          Lwt_condition.broadcast cond l;
           (* TODO think more abour renewal, adjust timeouts *)
           match renew with
           | true ->
@@ -100,14 +125,15 @@ module Make (Net : Mirage_net.S) = struct
       )
     in
     let lease_wrapper t stop_waker =
-      let cond = Lwt_condition.create () in
-      Lwt.both
+      Lwt.all
+        [
         (listen t cond >|= fun r ->
-         Lwt.wakeup_later stop_waker r)
-        (get_lease cond dhcpdiscover)
-      >|= fun ((), ()) -> ()
+         Lwt.wakeup_later stop_waker r);
+        (get_lease cond dhcpdiscover);
+        do_renew t;
+      ]
+      >|= fun _units -> ()
     in
-    let lease = Lwt_mvar.create_empty () in
     let stop, stop_waker = Lwt.task () in
     let t = { lease; net; listen = Fun.const Lwt.return_unit; stop; listener_condition = Lwt_condition.create () } in
     Lwt.async (fun () -> lease_wrapper t stop_waker);
