@@ -46,6 +46,7 @@ module Make (Net : Mirage_net.S) = struct
         |> Option.get
       in
       let t2 = Mirage_sleep.ns @@ Duration.of_sec t2 in
+      let new_lease = Lwt_condition.wait cond >|= fun lease -> `Lease lease in
       Mirage_sleep.ns @@ Duration.of_sec renewal >>= fun () ->
       let rec send_renewal () =
         match Dhcp_client.renew !c with
@@ -59,7 +60,7 @@ module Make (Net : Mirage_net.S) = struct
             Mirage_sleep.ns (Duration.of_sec 1) >>= send_renewal
       in
       Lwt.pick [
-        (Lwt_condition.wait cond >|= fun lease -> `Lease lease);
+        new_lease;
         send_renewal ();
         (t2 >|= fun () -> `T2_rebinding)
       ] >>= function
