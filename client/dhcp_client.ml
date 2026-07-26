@@ -147,6 +147,22 @@ let offer (t : t) ~xid ~chaddr ~server_ip ~request_ip ~offer_options =
   in
   make_request ~xid ~chaddr ~srcmac:t.srcmac ~siaddr:server_ip ~options:options ()
 
+(* DHCPREQUEST generated during RENEWING state (RFC 2131 Section 4.3.2):
+   - 'server identifier' MUST NOT be filled in
+   - 'requested IP address' option MUST NOT be filled in
+   - 'ciaddr' MUST be filled in with client's IP address *)
+let renew_request (t : t) ~ciaddr ~xid ~chaddr =
+  let open Dhcp_wire in
+  let options = [
+    Message_type DHCPREQUEST;
+  ] @ t.options in
+  let options =
+    match t.request_options with
+    | [] -> options
+    | _::_ -> (Parameter_requests t.request_options) :: options
+  in
+  make_request ~ciaddr ~xid ~chaddr ~srcmac:t.srcmac ~siaddr:Ipaddr.V4.any ~options ()
+
 (* make a new DHCP client. allow the user to request a specific xid, any
    requests, and the MAC address to use as the source for Ethernet messages and
    the chaddr in the fixed-length part of the message *)
@@ -239,9 +255,6 @@ let renew t = match t.state with
   | Selecting _ | Requesting _ -> `Noop
   | Renewing (_lease, request) -> `Response (t, request)
   | Bound lease ->
-    let open Dhcp_wire in
-    let request = offer t ~xid:lease.xid ~chaddr:lease.chaddr
-      ~server_ip:lease.siaddr ~request_ip:lease.yiaddr
-      ~offer_options:lease.options in
+    let request = renew_request t ~ciaddr:lease.yiaddr ~xid:lease.xid ~chaddr:lease.chaddr in
     let state = Renewing (lease, request) in
     `Response ({t with state = state}, request)
