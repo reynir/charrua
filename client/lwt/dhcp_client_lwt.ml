@@ -50,9 +50,11 @@ module Make (Net : Mirage_net.S) = struct
       Mirage_sleep.ns @@ Duration.of_sec renewal >>= fun () ->
       let rec send_renewal () =
         match Dhcp_client.renew !c with
-        | `Noop -> Lwt.return `Can't_renew
-        | `Response (c, pkt) ->
-          Log.debug (fun f -> f "attempted to renew lease: %a" Dhcp_client.pp c);
+        | `Noop -> 
+          Lwt.return `Can't_renew
+        | `Response (updated_c, pkt) ->
+          c := updated_c;
+          Log.debug (fun f -> f "attempted to renew lease: %a" Dhcp_client.pp updated_c);
           Net.write net ~size (Dhcp_wire.pkt_into_buf pkt) >>= function
           | Error e ->
             Lwt.return (`Failed_to_write e)
