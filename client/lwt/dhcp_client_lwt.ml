@@ -41,11 +41,18 @@ module Make (Net : Mirage_net.S) = struct
       in
       let t2 (* rebinding *) =
         Dhcp_wire.find_rebinding_t2 lease.Dhcp_wire.options
+        |> Option.value ~default:75600l (* 21h = (7/8)*24h *)
+        |> Int32.unsigned_to_int
+        |> Option.get
+      in
+      let expiry =
+        Dhcp_wire.find_ip_lease_time lease.Dhcp_wire.options
         |> Option.value ~default:86400l (* 24h *)
         |> Int32.unsigned_to_int
         |> Option.get
       in
       let t2 = Mirage_sleep.ns @@ Duration.of_sec t2 in
+      let expiry = Mirage_sleep.ns @@ Duration.of_sec expiry in
       let new_lease = Lwt_condition.wait cond >|= fun lease -> `Lease lease in
       Mirage_sleep.ns @@ Duration.of_sec renewal >>= fun () ->
       let rec send_renewal () =
@@ -59,21 +66,55 @@ module Make (Net : Mirage_net.S) = struct
           | Error e ->
             Lwt.return (`Failed_to_write e)
           | Ok () ->
-            Mirage_sleep.ns (Duration.of_sec 1) >>= send_renewal
+            Mirage_sleep.ns sleep_interval >>= send_renewal
       in
       Lwt.pick [
         new_lease;
         send_renewal ();
-        (t2 >|= fun () -> `T2_rebinding)
+        (t2 >|= fun () -> `T2_rebinding);
+        (expiry >|= fun () -> `Expired);
       ] >>= function
       | `Lease lease ->
         do_renew lease
-      | `T2_rebinding ->
-        (* TODO *)
-        failwith "oh no"
       | `Can't_renew ->
         Log.debug (fun f -> f "Can't renew this lease; won't try");
         Lwt.return_unit
+      | `T2_rebinding ->
+        do_rebind expiry
+      | `Expired ->
+        Log.warn (fun f -> f "Lease expired before we could renew");
+        failwith "DHCP lease expired"
+      | `Failed_to_write e ->
+        Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
+        Lwt.return_unit
+    and do_rebind expiry =
+      let new_lease = Lwt_condition.wait cond >|= fun lease -> `Lease lease in
+      let rec send_rebind () =
+        match Dhcp_client.rebind !c with
+        | `Noop ->
+          Lwt.return `Can't_renew
+        | `Response (updated_c, pkt) ->
+          c := updated_c;
+          Log.debug (fun f -> f "attempted to rebind lease: %a" Dhcp_client.pp updated_c);
+          Net.write net ~size (Dhcp_wire.pkt_into_buf pkt) >>= function
+          | Error e ->
+            Lwt.return (`Failed_to_write e)
+          | Ok () ->
+            Mirage_sleep.ns sleep_interval >>= send_rebind
+      in
+      Lwt.pick [
+        new_lease;
+        send_rebind ();
+        (expiry >|= fun () -> `Expired);
+      ] >>= function
+      | `Lease lease ->
+        do_renew lease
+      | `Can't_renew ->
+        Log.debug (fun f -> f "Can't renew this lease; won't try");
+        Lwt.return_unit
+      | `Expired ->
+        Log.warn (fun f -> f "Lease expired before we could renew");
+        failwith "DHCP lease expired"
       | `Failed_to_write e ->
         Log.err (fun f -> f "Failed to write lease renewal request: %a" Net.pp_error e);
         Lwt.return_unit
