@@ -115,7 +115,8 @@ let xid_matches {state; _} xid =
 
 (* given a set of information, assemble a DHCPREQUEST packet from the Constants
    module and other constants defined in Dhcp_wire. *)
-let make_request ?(ciaddr = Ipaddr.V4.any) ~xid ~chaddr ~srcmac ~siaddr ~options () =
+let make_request ?(srcip = Ipaddr.V4.any) ?(dstip = Ipaddr.V4.broadcast) ?(ciaddr = Ipaddr.V4.any)
+    ~xid ~chaddr ~srcmac ~siaddr ~options () =
   let open Dhcp_wire in
   Constants.({
     htype; hlen; hops; sname; file;
@@ -124,14 +125,14 @@ let make_request ?(ciaddr = Ipaddr.V4.any) ~xid ~chaddr ~srcmac ~siaddr ~options
     srcport = Dhcp_wire.client_port;
     dstport = Dhcp_wire.server_port;
     srcmac;
-    srcip = Ipaddr.V4.any;
+    srcip;
     (* destinations should still be broadcast,
      * even though we have the necessary information to send unicast,
      * because there might be >1 DHCP server on the network.
      * those who we're not responding to should know that we're in a
      * transaction to accept another lease. *)
     dstmac = Macaddr.broadcast;
-    dstip = Ipaddr.V4.broadcast;
+    dstip;
     op = BOOTREQUEST;
     options;
     secs = 0;
@@ -168,9 +169,9 @@ let offer (t : t) ~xid ~chaddr ~server_ip ~request_ip ~offer_options =
    - 'server identifier' MUST NOT be filled in
    - 'requested IP address' option MUST NOT be filled in
    - 'ciaddr' MUST be filled in with client's IP address
-   - for RENEWING we fill siaddr, for REBINDING we broadcast
+   - for RENEWING we fill siaddr and unicast, for REBINDING we broadcast
 *)
-let renew_request ?(siaddr = Ipaddr.V4.any) (t : t) ~ciaddr ~xid ~chaddr =
+let renew_request ?siaddr (t : t) ~ciaddr ~xid ~chaddr =
   let open Dhcp_wire in
   let options = [
     Message_type DHCPREQUEST;
@@ -180,7 +181,16 @@ let renew_request ?(siaddr = Ipaddr.V4.any) (t : t) ~ciaddr ~xid ~chaddr =
     | [] -> options
     | _::_ -> (Parameter_requests t.request_options) :: options
   in
-  make_request ~ciaddr ~xid ~chaddr ~srcmac:t.srcmac ~siaddr ~options ()
+  let dstip, siaddr =
+    (* [siaddr] being [Some _] signals we are renewing. When renewing:
+       - fill siaddr and unicast to the DHCP server
+       when rebinding:
+       - leave siaddr all zeroes and broadcast to any DHCP server *)
+    match siaddr with
+    | None -> None, Ipaddr.V4.any
+    | Some siaddr -> Some siaddr, siaddr
+  in
+  make_request ~srcip:ciaddr ?dstip ~ciaddr ~xid ~chaddr ~srcmac:t.srcmac ~siaddr ~options ()
 
 (* make a new DHCP client. allow the user to request a specific xid, any
    requests, and the MAC address to use as the source for Ethernet messages and
