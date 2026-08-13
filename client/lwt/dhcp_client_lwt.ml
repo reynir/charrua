@@ -37,19 +37,19 @@ module Make (Net : Mirage_net.S) = struct
         Dhcp_wire.find_renewal_t1 lease.Dhcp_wire.options
         |> Option.value ~default:1800l
         |> Int32.unsigned_to_int
-        |> Option.get (* XXX(reynir): assume 64 bit!? *)
+        |> Option.value ~default:Int.max_int
       in
       let t2 (* rebinding *) =
         Dhcp_wire.find_rebinding_t2 lease.Dhcp_wire.options
         |> Option.value ~default:75600l (* 21h = (7/8)*24h *)
         |> Int32.unsigned_to_int
-        |> Option.get
+        |> Option.value ~default:Int.max_int
       in
       let expiry =
         Dhcp_wire.find_ip_lease_time lease.Dhcp_wire.options
         |> Option.value ~default:86400l (* 24h *)
         |> Int32.unsigned_to_int
-        |> Option.get
+        |> Option.value ~default:Int.max_int
       in
       let t2 = Mirage_sleep.ns @@ Duration.of_sec t2 in
       let expiry = Mirage_sleep.ns @@ Duration.of_sec expiry in
